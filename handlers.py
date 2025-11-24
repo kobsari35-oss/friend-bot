@@ -419,7 +419,7 @@ async def save_edit_age(u, c):
     return await save_edit_generic(u, c, 'age')
 async def bad_photo(u, c): await u.message.reply_text(TEXTS['wrong_input_photo']); return EDIT_PHOTO
 
-# --- ADMIN & MISC ---
+# --- ADMIN & MISC (UPDATED BROADCAST) ---
 async def cancel(update, context): await update.message.reply_text("🏠 Home", reply_markup=get_main_menu()); return ConversationHandler.END
 async def help_cmd(update, context): await update.message.reply_text(TEXTS['help_msg'], parse_mode='Markdown', reply_markup=get_main_menu())
 
@@ -446,18 +446,56 @@ async def stats(update, context):
     release_db_connection(conn)
     await update.message.reply_text(f"📊 Users: {tot}")
 
-async def broadcast(update, context):
-    if update.effective_user.id != ADMIN_ID: return
-    msg = " ".join(context.args)
-    if not msg: return
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 1. Check Admin
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ You are not Admin.")
+        return
+
+    # 2. Get Message (Reply or Args)
+    msg = None
+    photo_id = None
+    
+    if update.message.reply_to_message:
+        reply = update.message.reply_to_message
+        msg = reply.text or reply.caption
+        if reply.photo:
+            photo_id = reply.photo[-1].file_id
+            
+    elif context.args:
+        msg = " ".join(context.args)
+
+    if not msg and not photo_id:
+        await update.message.reply_text("⚠️ **How to Broadcast:**\n1. Send a message/photo first.\n2. **Reply** to it with `/broadcast`")
+        return
+
+    # 3. Get Users
     conn = get_db_connection()
     if not conn: return
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM users")
-            users = cur.fetchall()
-    release_db_connection(conn)
-    await update.message.reply_text("Broadcasting...")
+    users = []
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM users")
+                users = cur.fetchall()
+    finally: release_db_connection(conn)
+
+    # 4. Send
+    await update.message.reply_text(f"📢 Sending to {len(users)} users...")
+    count = 0
+    blocked = 0
+
     for u in users:
-        try: await context.bot.send_message(u[0], f"📢 {msg}")
-        except: pass
+        try:
+            if photo_id:
+                await context.bot.send_photo(chat_id=u[0], photo=photo_id, caption=msg, parse_mode='Markdown')
+            else:
+                await context.bot.send_message(chat_id=u[0], text=f"📢 {msg}", parse_mode='Markdown')
+            
+            count += 1
+            await asyncio.sleep(0.05) # Prevent Flood
+        except Exception:
+            blocked += 1
+            pass
+
+    await update.message.reply_text(f"✅ **Broadcast Done!**\n\nSuccess: {count}\nFailed (Blocked): {blocked}")
