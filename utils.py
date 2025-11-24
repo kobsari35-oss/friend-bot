@@ -25,7 +25,9 @@ async def find_and_send_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
     conn = get_db_connection()
     
     if not conn:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ System busy. Try again.")
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ System busy. Try again.")
+        except: pass
         return
 
     match = None
@@ -67,7 +69,7 @@ async def find_and_send_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
         target_id = match[0]
         safe_name = escape_md(match[1])
         
-        # --- UI DESIGN: PROFILE CARD ---
+        # --- UI DESIGN: PROFILE CARD (FOR SEARCH) ---
         caption = (
             f"🌟 **{safe_name}, {match[2]}**\n"
             f"📍 {escape_md(match[4])}\n" 
@@ -101,6 +103,8 @@ async def find_and_send_user(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 async def broadcast_new_user(context: ContextTypes.DEFAULT_TYPE, user_data: dict):
     sender_id = user_data['id']
+    
+    # ប្រើ Text ពី Config
     caption = TEXTS['new_user_alert'].format(
         name=escape_md(user_data['name']),
         age=user_data['age'],
@@ -113,15 +117,24 @@ async def broadcast_new_user(context: ContextTypes.DEFAULT_TYPE, user_data: dict
     try:
         with conn:
             with conn.cursor() as cursor:
+                # ផ្ញើជូនសមាជិក Active ទាំងអស់ (កំណត់ត្រឹម 100 នាក់ចុងក្រោយដើម្បីកុំឱ្យគាំងបើមានមនុស្សច្រើនពេក)
                 cursor.execute("SELECT user_id FROM users WHERE status = 'active' AND user_id != %s LIMIT 100", (sender_id,))
                 users = cursor.fetchall()
     except: return
     finally: release_db_connection(conn)
 
-    kb = [[InlineKeyboardButton("🔎 Search Now", switch_inline_query_current_chat="")]]
+    # 🔥 UPDATE: ប៊ូតុង Chat ផ្ទាល់
+    chat_url = f"tg://user?id={sender_id}"
+    kb = [[InlineKeyboardButton(f"💌 Chat with {user_data['name']}", url=chat_url)]]
     
     for u in users:
         try:
-            await context.bot.send_photo(chat_id=u[0], photo=user_data['photo'], caption=caption, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
-            await asyncio.sleep(0.05) 
+            await context.bot.send_photo(
+                chat_id=u[0], 
+                photo=user_data['photo'], 
+                caption=caption, 
+                reply_markup=InlineKeyboardMarkup(kb), 
+                parse_mode='Markdown'
+            )
+            await asyncio.sleep(0.05) # ការពារ Flood Limit
         except: continue
